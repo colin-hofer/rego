@@ -8,11 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"rego/internal/db"
 	"rego/internal/dev"
+	"rego/internal/envx"
 	"rego/internal/logx"
 	"rego/internal/server"
 	"rego/internal/web"
@@ -33,6 +33,8 @@ func Run(ctx context.Context, args []string) error {
 		return runDev(ctx, root, args[1:])
 	case "serve":
 		return runServe(ctx, root, args[1:])
+	case "feature":
+		return runFeature(ctx, root, args[1:])
 	case "db":
 		return runDB(ctx, root, args[1:])
 	case "build":
@@ -100,11 +102,11 @@ func runServe(ctx context.Context, root string, args []string) error {
 
 	logger := baseLogger.WithComponent("http")
 	httpServer, err := server.New(server.Options{
-		Addr:     *addr,
-		Root:     root,
-		Dev:      *devMode,
-		Logger:   logger,
-		Database: databaseRuntime.DB,
+		Addr:    *addr,
+		Root:    root,
+		Dev:     *devMode,
+		Logger:  logger,
+		Modules: loadServerModules(baseLogger, databaseRuntime.DB),
 	})
 	if err != nil {
 		return closeRuntime(err, databaseRuntime)
@@ -194,7 +196,7 @@ func runCommand(ctx context.Context, workingDir string, logger *logx.Logger, env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if len(env) > 0 {
-		cmd.Env = mergeEnvironment(os.Environ(), env)
+		cmd.Env = envx.MergeMap(os.Environ(), env)
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -203,42 +205,6 @@ func runCommand(ctx context.Context, workingDir string, logger *logx.Logger, env
 
 	return nil
 }
-
-func formatEnv(values map[string]string) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	env := make([]string, 0, len(values))
-	for _, key := range keys {
-		env = append(env, key+"="+values[key])
-	}
-
-	return env
-}
-
-func mergeEnvironment(base []string, overrides map[string]string) []string {
-	if len(overrides) == 0 {
-		return base
-	}
-
-	merged := make([]string, 0, len(base)+len(overrides))
-	for _, entry := range base {
-		key, _, ok := strings.Cut(entry, "=")
-		if ok {
-			if _, exists := overrides[key]; exists {
-				continue
-			}
-		}
-		merged = append(merged, entry)
-	}
-
-	merged = append(merged, formatEnv(overrides)...)
-	return merged
-}
-
 func closeRuntime(runErr error, runtime *db.Runtime) error {
 	if runtime == nil {
 		return runErr
@@ -269,6 +235,7 @@ func usage() string {
 Commands:
   dev                 Run local development mode with hot reload.
   serve               Run the HTTP server (embedded assets by default).
+  feature             Scaffold backend/frontend feature modules.
   db                  Postgres utilities (status, shell).
   build               Build frontend assets and Go binary.
   test                Run backend and frontend tests.
@@ -276,6 +243,7 @@ Commands:
 Examples:
   go run ./cmd/rego dev
   go run ./cmd/rego serve --addr :8080
+  go run ./cmd/rego feature new billing
   go run ./cmd/rego db status
   go run ./cmd/rego serve --database-url postgres://user:pass@localhost:5432/app?sslmode=disable
   go run ./cmd/rego build --output bin/rego

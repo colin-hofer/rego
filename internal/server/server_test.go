@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"rego/internal/logx"
+	"rego/internal/modules/metadata"
+	"rego/internal/modules/system"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -81,6 +83,10 @@ func TestDevEventsEndpointStreams(t *testing.T) {
 		Dev:      true,
 		Logger:   logx.New(logx.ErrorLevel),
 		StaticFS: static,
+		Modules: []Module{
+			system.New(system.Options{Logger: logx.New(logx.ErrorLevel)}),
+			metadata.New(metadata.Options{Logger: logx.New(logx.ErrorLevel)}),
+		},
 	})
 	if err != nil {
 		t.Fatalf("create server: %v", err)
@@ -118,6 +124,20 @@ func TestDevEventsEndpointStreams(t *testing.T) {
 	}
 }
 
+func TestMetadataWithoutDatabase(t *testing.T) {
+	t.Parallel()
+
+	sut := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/metadata", nil)
+
+	sut.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
@@ -132,6 +152,10 @@ func newTestServer(t *testing.T) *Server {
 		Dev:      false,
 		Logger:   logx.New(logx.ErrorLevel),
 		StaticFS: static,
+		Modules: []Module{
+			system.New(system.Options{Logger: logx.New(logx.ErrorLevel)}),
+			metadata.New(metadata.Options{Logger: logx.New(logx.ErrorLevel)}),
+		},
 	})
 	if err != nil {
 		t.Fatalf("create server: %v", err)

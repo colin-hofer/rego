@@ -23,11 +23,12 @@ type Options struct {
 	Dev      bool
 	Logger   *logx.Logger
 	StaticFS fs.FS
-	Database DatabasePinger
+	Modules  []Module
 }
 
-type DatabasePinger interface {
-	PingContext(ctx context.Context) error
+type Module interface {
+	Name() string
+	RegisterRoutes(mux *http.ServeMux)
 }
 
 type Server struct {
@@ -38,7 +39,6 @@ type Server struct {
 	fileServer http.Handler
 	reloader   *Reloader
 	handler    http.Handler
-	database   DatabasePinger
 }
 
 func New(options Options) (*Server, error) {
@@ -79,11 +79,21 @@ func New(options Options) (*Server, error) {
 		staticFS:   staticFS,
 		fileServer: http.FileServer(http.FS(staticFS)),
 		reloader:   NewReloader(),
-		database:   options.Database,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/healthz", s.handleHealth)
+	for _, module := range options.Modules {
+		if module == nil {
+			continue
+		}
+		module.RegisterRoutes(mux)
+		name := strings.TrimSpace(module.Name())
+		if name == "" {
+			name = "unnamed"
+		}
+		logger.Info("module loaded", "module", name)
+	}
+
 	if s.dev {
 		mux.HandleFunc("/_dev/events", s.handleDevEvents)
 		mux.HandleFunc("/_dev/reload", s.handleDevReload)
@@ -133,52 +143,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 		return nil
 	}
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	type databaseHealth struct {
-		Status string `json:"status"`
-	}
-
-	type healthResponse struct {
-		Status   string         `json:"status"`
-		Time     string         `json:"time"`
-		Database databaseHealth `json:"database"`
-	}
-
-	statusCode := http.StatusOK
-	databaseStatus := databaseHealth{Status: "disabled"}
-	if s.database != nil {
-		pingCtx, cancel := context.WithTimeout(req.Context(), 750*time.Millisecond)
-		err := s.database.PingContext(pingCtx)
-		cancel()
-
-		if err != nil {
-			databaseStatus.Status = "down"
-			statusCode = http.StatusServiceUnavailable
-		} else {
-			databaseStatus.Status = "up"
-		}
-	}
-
-	responseStatus := "ok"
-	if statusCode != http.StatusOK {
-		responseStatus = "degraded"
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	response := healthResponse{
-		Status:   responseStatus,
-		Time:     time.Now().UTC().Format(time.RFC3339),
-		Database: databaseStatus,
-	}
-	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) handleDevEvents(w http.ResponseWriter, req *http.Request) {
