@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed dist dist/.gitkeep
+//go:embed all:dist
 var embeddedDist embed.FS
 
 func DistFS() (fs.FS, error) {
