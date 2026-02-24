@@ -1,0 +1,156 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+:root {
+  --bg-top: #041427;
+  --bg-mid: #0d2d44;
+  --bg-bottom: #141414;
+  --text-main: #f2f4f9;
+  --text-soft: #c6d9e8;
+  --accent: #ffb347;
+  --accent-2: #39d4b0;
+  --danger: #ff6f7d;
+  --card-bg: rgba(255, 255, 255, 0.08);
+  --card-border: rgba(255, 255, 255, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--text-main);
+  background: radial-gradient(circle at 15% 15%, #16697a 0%, transparent 40%),
+    radial-gradient(circle at 80% 20%, #ff8b53 0%, transparent 35%),
+    linear-gradient(160deg, var(--bg-top), var(--bg-mid) 55%, var(--bg-bottom));
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.page {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 2rem;
+}
+
+.hero {
+  position: relative;
+  width: min(720px, 100%);
+  padding: 2.5rem;
+  border-radius: 1.5rem;
+  border: 1px solid var(--card-border);
+  background: linear-gradient(160deg, var(--card-bg), rgba(3, 14, 26, 0.6));
+  backdrop-filter: blur(8px);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
+  animation: rise 600ms ease-out both;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+h1 {
+  margin: 0.6rem 0 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+}
+
+.lede {
+  margin-top: 1rem;
+  line-height: 1.65;
+  color: var(--text-soft);
+  max-width: 55ch;
+}
+
+.status-card {
+  margin-top: 2rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.22);
+  padding: 1rem 1.2rem;
+}
+
+.status-label {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.status-ok {
+  margin: 0.5rem 0 0;
+  color: var(--accent-2);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.status-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-soft);
+}
+
+.status-error {
+  margin: 0.65rem 0 0;
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.glow {
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(35px);
+  opacity: 0.45;
+}
+
+.glow-a {
+  width: 320px;
+  height: 320px;
+  top: -80px;
+  left: -100px;
+  background: #38bdf8;
+}
+
+.glow-b {
+  width: 280px;
+  height: 280px;
+  bottom: -90px;
+  right: -60px;
+  background: #f97316;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 1rem;
+  }
+
+  .hero {
+    padding: 1.5rem;
+  }
+
+  .lede {
+    font-size: 0.95rem;
+  }
+}
