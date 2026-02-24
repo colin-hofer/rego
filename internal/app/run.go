@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"rego/internal/db"
 	"rego/internal/dev"
 	"rego/internal/logx"
 	"rego/internal/server"
@@ -30,6 +33,8 @@ func Run(ctx context.Context, args []string) error {
 		return runDev(ctx, root, args[1:])
 	case "serve":
 		return runServe(ctx, root, args[1:])
+	case "db":
+		return runDB(ctx, root, args[1:])
 	case "build":
 		return runBuild(ctx, root, args[1:])
 	case "test":
@@ -47,12 +52,29 @@ func runDev(ctx context.Context, root string, args []string) error {
 	flags.SetOutput(os.Stdout)
 
 	addr := flags.String("addr", ":8080", "HTTP listen address")
+	databaseURL := flags.String("database-url", "", "Postgres connection string (defaults to DATABASE_URL or managed embedded Postgres)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
 	logger := newLogger(logx.InfoLevel)
-	return dev.Run(ctx, root, *addr, logger)
+	databaseRuntime, err := db.Start(ctx, db.Options{
+		Root:        root,
+		Logger:      logger.WithComponent("db"),
+		DatabaseURL: *databaseURL,
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := databaseRuntime.CloseConnections(); err != nil {
+		return closeRuntime(err, databaseRuntime)
+	}
+
+	err = dev.Run(ctx, root, *addr, map[string]string{
+		"DATABASE_URL": databaseRuntime.URL,
+	}, logger)
+	return closeRuntime(err, databaseRuntime)
 }
 
 func runServe(ctx context.Context, root string, args []string) error {
@@ -61,22 +83,35 @@ func runServe(ctx context.Context, root string, args []string) error {
 
 	addr := flags.String("addr", ":8080", "HTTP listen address")
 	devMode := flags.Bool("dev", false, "serve files from disk and enable live reload endpoints")
+	databaseURL := flags.String("database-url", "", "Postgres connection string (defaults to DATABASE_URL or managed embedded Postgres)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
-	logger := newLogger(logx.InfoLevel).WithComponent("http")
-	httpServer, err := server.New(server.Options{
-		Addr:   *addr,
-		Root:   root,
-		Dev:    *devMode,
-		Logger: logger,
+	baseLogger := newLogger(logx.InfoLevel)
+	databaseRuntime, err := db.Start(ctx, db.Options{
+		Root:        root,
+		Logger:      baseLogger.WithComponent("db"),
+		DatabaseURL: *databaseURL,
 	})
 	if err != nil {
 		return err
 	}
 
-	return httpServer.ListenAndServe(ctx)
+	logger := baseLogger.WithComponent("http")
+	httpServer, err := server.New(server.Options{
+		Addr:     *addr,
+		Root:     root,
+		Dev:      *devMode,
+		Logger:   logger,
+		Database: databaseRuntime.DB,
+	})
+	if err != nil {
+		return closeRuntime(err, databaseRuntime)
+	}
+
+	err = httpServer.ListenAndServe(ctx)
+	return closeRuntime(err, databaseRuntime)
 }
 
 func runBuild(ctx context.Context, root string, args []string) error {
@@ -103,7 +138,7 @@ func runBuild(ctx context.Context, root string, args []string) error {
 		return fmt.Errorf("create build output directory: %w", err)
 	}
 
-	if err := runCommand(ctx, root, logger.WithComponent("go"), "go", "build", "-o", *output, "./cmd/rego"); err != nil {
+	if err := runCommand(ctx, root, logger.WithComponent("go"), nil, "go", "build", "-o", *output, "./cmd/rego"); err != nil {
 		return err
 	}
 
@@ -114,43 +149,110 @@ func runBuild(ctx context.Context, root string, args []string) error {
 func runTest(ctx context.Context, root string, args []string) error {
 	flags := flag.NewFlagSet("test", flag.ContinueOnError)
 	flags.SetOutput(os.Stdout)
+	databaseURL := flags.String("database-url", "", "Postgres connection string (defaults to DATABASE_URL or managed embedded Postgres)")
 
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
 	logger := newLogger(logx.InfoLevel)
-
-	if err := runCommand(ctx, root, logger.WithComponent("go"), "go", "test", "./..."); err != nil {
+	databaseRuntime, err := db.Start(ctx, db.Options{
+		Root:        root,
+		Logger:      logger.WithComponent("db"),
+		DatabaseURL: *databaseURL,
+	})
+	if err != nil {
 		return err
+	}
+
+	commandEnv := map[string]string{
+		"DATABASE_URL": databaseRuntime.URL,
+	}
+
+	if err := runCommand(ctx, root, logger.WithComponent("go"), commandEnv, "go", "test", "./..."); err != nil {
+		return closeRuntime(err, databaseRuntime)
 	}
 
 	if err := web.EnsureNodeModules(ctx, root, logger.WithComponent("npm")); err != nil {
-		return err
+		return closeRuntime(err, databaseRuntime)
 	}
 
 	webDir := filepath.Join(root, "web")
-	if err := runCommand(ctx, webDir, logger.WithComponent("web-test"), "npm", "run", "test", "--", "--run"); err != nil {
-		return err
+	if err := runCommand(ctx, webDir, logger.WithComponent("web-test"), nil, "npm", "run", "test", "--", "--run"); err != nil {
+		return closeRuntime(err, databaseRuntime)
 	}
 
 	logger.Info("all tests passed")
-	return nil
+	return closeRuntime(nil, databaseRuntime)
 }
 
-func runCommand(ctx context.Context, workingDir string, logger *logx.Logger, command string, args ...string) error {
+func runCommand(ctx context.Context, workingDir string, logger *logx.Logger, env map[string]string, command string, args ...string) error {
 	logger.Info("running command", "command", strings.Join(append([]string{command}, args...), " "))
 
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = workingDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if len(env) > 0 {
+		cmd.Env = mergeEnvironment(os.Environ(), env)
+	}
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("command failed (%s): %w", strings.Join(append([]string{command}, args...), " "), err)
 	}
 
 	return nil
+}
+
+func formatEnv(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	env := make([]string, 0, len(values))
+	for _, key := range keys {
+		env = append(env, key+"="+values[key])
+	}
+
+	return env
+}
+
+func mergeEnvironment(base []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return base
+	}
+
+	merged := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, exists := overrides[key]; exists {
+				continue
+			}
+		}
+		merged = append(merged, entry)
+	}
+
+	merged = append(merged, formatEnv(overrides)...)
+	return merged
+}
+
+func closeRuntime(runErr error, runtime *db.Runtime) error {
+	if runtime == nil {
+		return runErr
+	}
+
+	closeErr := runtime.Close()
+	if closeErr == nil {
+		return runErr
+	}
+	if runErr == nil {
+		return closeErr
+	}
+
+	return errors.Join(runErr, closeErr)
 }
 
 func newLogger(defaultLevel logx.Level) *logx.Logger {
@@ -167,12 +269,15 @@ func usage() string {
 Commands:
   dev                 Run local development mode with hot reload.
   serve               Run the HTTP server (embedded assets by default).
+  db                  Postgres utilities (status, shell).
   build               Build frontend assets and Go binary.
   test                Run backend and frontend tests.
 
 Examples:
   go run ./cmd/rego dev
   go run ./cmd/rego serve --addr :8080
+  go run ./cmd/rego db status
+  go run ./cmd/rego serve --database-url postgres://user:pass@localhost:5432/app?sslmode=disable
   go run ./cmd/rego build --output bin/rego
   go run ./cmd/rego test
 `

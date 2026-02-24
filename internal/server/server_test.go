@@ -30,6 +30,9 @@ func TestHealthEndpoint(t *testing.T) {
 	if !strings.Contains(string(body), `"status":"ok"`) {
 		t.Fatalf("expected response body to include status=ok, got %s", string(body))
 	}
+	if !strings.Contains(string(body), `"database":{"status":"disabled"}`) {
+		t.Fatalf("expected response body to include database status, got %s", string(body))
+	}
 }
 
 func TestSPAFallbackAndAssetHandling(t *testing.T) {

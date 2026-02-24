@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 type HealthPayload = {
   status: string;
   time: string;
+  database?: {
+    status: string;
+  };
 };
 
 export function App() {
@@ -54,6 +57,9 @@ export function App() {
           {health ? (
             <>
               <p className="status-ok">{health.status.toUpperCase()}</p>
+              <p className="status-meta">
+                Database {health.database?.status ? health.database.status.toUpperCase() : "UNKNOWN"}
+              </p>
               <p className="status-meta">{new Date(health.time).toLocaleString()}</p>
             </>
           ) : (

@@ -23,6 +23,11 @@ type Options struct {
 	Dev      bool
 	Logger   *logx.Logger
 	StaticFS fs.FS
+	Database DatabasePinger
+}
+
+type DatabasePinger interface {
+	PingContext(ctx context.Context) error
 }
 
 type Server struct {
@@ -33,6 +38,7 @@ type Server struct {
 	fileServer http.Handler
 	reloader   *Reloader
 	handler    http.Handler
+	database   DatabasePinger
 }
 
 func New(options Options) (*Server, error) {
@@ -73,6 +79,7 @@ func New(options Options) (*Server, error) {
 		staticFS:   staticFS,
 		fileServer: http.FileServer(http.FS(staticFS)),
 		reloader:   NewReloader(),
+		database:   options.Database,
 	}
 
 	mux := http.NewServeMux()
@@ -134,10 +141,42 @@ func (s *Server) handleHealth(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	type databaseHealth struct {
+		Status string `json:"status"`
+	}
+
+	type healthResponse struct {
+		Status   string         `json:"status"`
+		Time     string         `json:"time"`
+		Database databaseHealth `json:"database"`
+	}
+
+	statusCode := http.StatusOK
+	databaseStatus := databaseHealth{Status: "disabled"}
+	if s.database != nil {
+		pingCtx, cancel := context.WithTimeout(req.Context(), 750*time.Millisecond)
+		err := s.database.PingContext(pingCtx)
+		cancel()
+
+		if err != nil {
+			databaseStatus.Status = "down"
+			statusCode = http.StatusServiceUnavailable
+		} else {
+			databaseStatus.Status = "up"
+		}
+	}
+
+	responseStatus := "ok"
+	if statusCode != http.StatusOK {
+		responseStatus = "degraded"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	response := map[string]string{
-		"status": "ok",
-		"time":   time.Now().UTC().Format(time.RFC3339),
+	w.WriteHeader(statusCode)
+	response := healthResponse{
+		Status:   responseStatus,
+		Time:     time.Now().UTC().Format(time.RFC3339),
+		Database: databaseStatus,
 	}
 	_ = json.NewEncoder(w).Encode(response)
 }

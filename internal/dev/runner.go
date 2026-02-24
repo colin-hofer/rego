@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +20,7 @@ import (
 	"rego/internal/web"
 )
 
-func Run(ctx context.Context, root string, addr string, logger *logx.Logger) error {
+func Run(ctx context.Context, root string, addr string, serverEnv map[string]string, logger *logx.Logger) error {
 	devLogger := logger.WithComponent("dev")
 	goLogger := logger.WithComponent("go")
 	reloadLogger := logger.WithComponent("reload")
@@ -43,7 +44,7 @@ func Run(ctx context.Context, root string, addr string, logger *logx.Logger) err
 		return err
 	}
 
-	process := newManagedProcess(root, binaryPath, addr, logger.WithComponent("server"))
+	process := newManagedProcess(root, binaryPath, addr, serverEnv, logger.WithComponent("server"))
 	if err := process.Start(); err != nil {
 		return err
 	}
@@ -327,16 +328,18 @@ type managedProcess struct {
 	root       string
 	binaryPath string
 	addr       string
+	env        []string
 	logger     *logx.Logger
 	cmd        *exec.Cmd
 	done       chan error
 }
 
-func newManagedProcess(root string, binaryPath string, addr string, logger *logx.Logger) *managedProcess {
+func newManagedProcess(root string, binaryPath string, addr string, env map[string]string, logger *logx.Logger) *managedProcess {
 	return &managedProcess{
 		root:       root,
 		binaryPath: binaryPath,
 		addr:       addr,
+		env:        formatEnvironment(env),
 		logger:     logger,
 	}
 }
@@ -353,6 +356,9 @@ func (p *managedProcess) Start() error {
 	cmd.Dir = p.root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if len(p.env) > 0 {
+		cmd.Env = mergeEnvironment(os.Environ(), p.env)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start backend process: %w", err)
@@ -375,6 +381,53 @@ func (p *managedProcess) Start() error {
 	}()
 
 	return nil
+}
+
+func formatEnvironment(values map[string]string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	env := make([]string, 0, len(keys))
+	for _, key := range keys {
+		env = append(env, key+"="+values[key])
+	}
+
+	return env
+}
+
+func mergeEnvironment(base []string, overrides []string) []string {
+	if len(overrides) == 0 {
+		return base
+	}
+
+	overrideKeys := make(map[string]struct{}, len(overrides))
+	for _, entry := range overrides {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			overrideKeys[key] = struct{}{}
+		}
+	}
+
+	merged := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, exists := overrideKeys[key]; exists {
+				continue
+			}
+		}
+		merged = append(merged, entry)
+	}
+
+	merged = append(merged, overrides...)
+	return merged
 }
 
 func (p *managedProcess) Stop(timeout time.Duration) error {
