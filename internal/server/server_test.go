@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"rego/internal/logx"
 )
@@ -60,6 +62,57 @@ func TestSPAFallbackAndAssetHandling(t *testing.T) {
 			t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
 		}
 	})
+}
+
+func TestDevEventsEndpointStreams(t *testing.T) {
+	t.Parallel()
+
+	static := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><html><body><div id=\"root\"></div></body></html>")},
+		"app.js":     &fstest.MapFile{Data: []byte("console.log('ok')")},
+		"app.css":    &fstest.MapFile{Data: []byte("body{}")},
+	}
+
+	sut, err := New(Options{
+		Addr:     ":0",
+		Dev:      true,
+		Logger:   logx.New(logx.ErrorLevel),
+		StaticFS: static,
+	})
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/_dev/events", nil)
+
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		sut.Handler().ServeHTTP(recorder, req)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for event stream response")
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%q", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+
+	if got := recorder.Header().Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("expected text/event-stream content type, got %q", got)
+	}
+
+	if !strings.Contains(recorder.Body.String(), ": connected") {
+		t.Fatalf("expected initial stream frame, got %q", recorder.Body.String())
+	}
 }
 
 func newTestServer(t *testing.T) *Server {

@@ -305,6 +305,12 @@ func (r *statusRecorder) Write(body []byte) (int, error) {
 	return count, err
 }
 
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 const liveReloadScript = `(() => {
   const endpoint = "/_dev/events";
   const events = new EventSource(endpoint);

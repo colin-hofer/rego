@@ -46,7 +46,7 @@ export function App() {
         <p className="eyebrow">Go-Centric React Starter</p>
         <h1>Rego starter app</h1>
         <p className="lede">
-          Backend routing, build orchestration, dev hot reload, and production asset serving all run through Go.
+          Backend routing, build orchestration, dev hot reload, and production asset serving run through Go.
         </p>
 
         <div className="status-card">
