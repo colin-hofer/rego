@@ -45,4 +45,5 @@ web/embed.go                # production go:embed assets
 ## Notes
 
 - First `dev`, `build`, or `test` run will install frontend dependencies via `npm install`.
+- `web/dist` is generated automatically by `dev` and `build`; the directory stays in git with `.gitkeep` while build artifacts are ignored.
 - `serve` in production mode uses embedded assets from `web/dist` at build time.

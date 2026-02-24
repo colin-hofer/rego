@@ -120,6 +120,11 @@ func prepareDist(root string, clean bool) error {
 		return fmt.Errorf("create dist directory: %w", err)
 	}
 
+	keepPath := filepath.Join(distDir, ".gitkeep")
+	if err := os.WriteFile(keepPath, nil, 0o644); err != nil {
+		return fmt.Errorf("ensure dist sentinel: %w", err)
+	}
+
 	return nil
 }
 
