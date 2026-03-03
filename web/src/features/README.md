@@ -1,16 +1,16 @@
 # Frontend Features
 
-Each feature should live in `web/src/features/<feature>`.
+Frontend code is organized by domain under `web/src/features/<name>`.
 
 ## Suggested shape
 
 ```text
 web/src/features/orders/
-  api.ts            # fetch wrappers for backend routes
-  OrdersPanel.tsx   # feature UI
+  api.ts              # fetch wrappers for backend routes
+  OrdersPanel.tsx     # feature UI
   OrdersPanel.test.tsx
 ```
 
-## Where to register feature routes
+## Registration
 
-Add the feature page component in `web/src/app/routes.tsx`.
+Render feature components from the landing page in `web/src/features/home/HomePage.tsx`.

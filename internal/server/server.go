@@ -23,12 +23,7 @@ type Options struct {
 	Dev      bool
 	Logger   *logx.Logger
 	StaticFS fs.FS
-	Modules  []Module
-}
-
-type Module interface {
-	Name() string
-	RegisterRoutes(mux *http.ServeMux)
+	Database DatabasePinger
 }
 
 type Server struct {
@@ -82,17 +77,7 @@ func New(options Options) (*Server, error) {
 	}
 
 	mux := http.NewServeMux()
-	for _, module := range options.Modules {
-		if module == nil {
-			continue
-		}
-		module.RegisterRoutes(mux)
-		name := strings.TrimSpace(module.Name())
-		if name == "" {
-			name = "unnamed"
-		}
-		logger.Info("module loaded", "module", name)
-	}
+	registerAPIRoutes(mux, logger.WithComponent("api"), options.Database)
 
 	if s.dev {
 		mux.HandleFunc("/_dev/events", s.handleDevEvents)

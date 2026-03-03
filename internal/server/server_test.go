@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,6 @@ import (
 	"time"
 
 	"rego/internal/logx"
-	"rego/internal/modules/metadata"
-	"rego/internal/modules/system"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -34,6 +33,38 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"database":{"status":"disabled"}`) {
 		t.Fatalf("expected response body to include database status, got %s", string(body))
+	}
+}
+
+func TestHealthEndpointReportsDegradedWhenDatabaseFails(t *testing.T) {
+	t.Parallel()
+
+	sut, err := New(Options{
+		Addr:     ":0",
+		Dev:      false,
+		Logger:   logx.New(logx.ErrorLevel),
+		StaticFS: testStaticFS(),
+		Database: failingPinger{},
+	})
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/healthz", nil)
+
+	sut.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"status":"degraded"`) {
+		t.Fatalf("expected degraded status, got %s", body)
+	}
+	if !strings.Contains(body, `"database":{"status":"down"}`) {
+		t.Fatalf("expected database=down, got %s", body)
 	}
 }
 
@@ -83,10 +114,6 @@ func TestDevEventsEndpointStreams(t *testing.T) {
 		Dev:      true,
 		Logger:   logx.New(logx.ErrorLevel),
 		StaticFS: static,
-		Modules: []Module{
-			system.New(system.Options{Logger: logx.New(logx.ErrorLevel)}),
-			metadata.New(metadata.Options{Logger: logx.New(logx.ErrorLevel)}),
-		},
 	})
 	if err != nil {
 		t.Fatalf("create server: %v", err)
@@ -124,42 +151,32 @@ func TestDevEventsEndpointStreams(t *testing.T) {
 	}
 }
 
-func TestMetadataWithoutDatabase(t *testing.T) {
-	t.Parallel()
-
-	sut := newTestServer(t)
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/metadata", nil)
-
-	sut.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
-	}
-}
-
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-
-	static := fstest.MapFS{
-		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><html><body><div id=\"root\"></div></body></html>")},
-		"app.js":     &fstest.MapFile{Data: []byte("console.log('ok')")},
-		"app.css":    &fstest.MapFile{Data: []byte("body{}")},
-	}
 
 	sut, err := New(Options{
 		Addr:     ":0",
 		Dev:      false,
 		Logger:   logx.New(logx.ErrorLevel),
-		StaticFS: static,
-		Modules: []Module{
-			system.New(system.Options{Logger: logx.New(logx.ErrorLevel)}),
-			metadata.New(metadata.Options{Logger: logx.New(logx.ErrorLevel)}),
-		},
+		StaticFS: testStaticFS(),
 	})
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
 
 	return sut
+}
+
+func testStaticFS() fstest.MapFS {
+	return fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><html><body><div id=\"root\"></div></body></html>")},
+		"app.js":     &fstest.MapFile{Data: []byte("console.log('ok')")},
+		"app.css":    &fstest.MapFile{Data: []byte("body{}")},
+	}
+}
+
+type failingPinger struct{}
+
+func (failingPinger) PingContext(context.Context) error {
+	return errors.New("boom")
 }

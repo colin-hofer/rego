@@ -33,8 +33,6 @@ func Run(ctx context.Context, args []string) error {
 		return runDev(ctx, root, args[1:])
 	case "serve":
 		return runServe(ctx, root, args[1:])
-	case "feature":
-		return runFeature(ctx, root, args[1:])
 	case "db":
 		return runDB(ctx, root, args[1:])
 	case "build":
@@ -102,11 +100,11 @@ func runServe(ctx context.Context, root string, args []string) error {
 
 	logger := baseLogger.WithComponent("http")
 	httpServer, err := server.New(server.Options{
-		Addr:    *addr,
-		Root:    root,
-		Dev:     *devMode,
-		Logger:  logger,
-		Modules: loadServerModules(baseLogger, databaseRuntime.DB),
+		Addr:     *addr,
+		Root:     root,
+		Dev:      *devMode,
+		Logger:   logger,
+		Database: databaseRuntime.DB,
 	})
 	if err != nil {
 		return closeRuntime(err, databaseRuntime)
@@ -235,7 +233,6 @@ func usage() string {
 Commands:
   dev                 Run local development mode with hot reload.
   serve               Run the HTTP server (embedded assets by default).
-  feature             Scaffold backend/frontend feature modules.
   db                  Postgres utilities (status, shell).
   build               Build frontend assets and Go binary.
   test                Run backend and frontend tests.
@@ -243,7 +240,6 @@ Commands:
 Examples:
   go run ./cmd/rego dev
   go run ./cmd/rego serve --addr :8080
-  go run ./cmd/rego feature new billing
   go run ./cmd/rego db status
   go run ./cmd/rego serve --database-url postgres://user:pass@localhost:5432/app?sslmode=disable
   go run ./cmd/rego build --output bin/rego
